@@ -12,8 +12,8 @@ public Plugin myinfo =
 	url = "enderG#0669"
 };
 
-static const char sGroup[] = "    ";
-							  //\\ Сюда вписываете свою группу!
+static const char sGroup[] = "";
+
 bool
 	bWHStatus[MAXPLAYERS+1];
 	
