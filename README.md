@@ -8,4 +8,4 @@
 4. Переходим в папку **compiled** (в этой же папке), открываем её и видим файл **WCS_addon_ChangeWh.smx**
 5. Переносим файл **WCS_addon_ChangeWh.smx** в папку **plugins** на вашем сервере. 
 
-###Также неплохо бы ознакомиться с WIKI - https://github.com/Classes123/ChangeWH/wiki
+### Также неплохо бы ознакомиться с WIKI - https://github.com/Classes123/ChangeWH/wiki
