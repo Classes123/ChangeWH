@@ -1,90 +1,132 @@
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
-																																	   //
-#define GROUPS 			"vip_wh1;vip_wh2;vip_wh"	//VIP-Группы, которые могут использовать эту команду (разделять с помощью ';').	   //
-#define GROUPS_COUNT 	3							//Число VIP-Групп, указанных выше.												   //
-																																	   //
-/////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+#define PLUGIN_NAME "[WC:Source] [VIP] Change WH"
+#define FLOOD_TIME  1
 
-
-#pragma semicolon 1
-
+#include <clientprefs>
 #include <wcs>
 
+#pragma semicolon 1
 #pragma newdecls required
 
 public Plugin myinfo =
 {
-	name = "[WC:Source] [WCSVIP] Change WH",
+	name = PLUGIN_NAME,
 	author = "Young <",
-	version = "1.1.0"
+	version = "1.2.0"
 };
 
 
-char 
-	g_sPrefix[128],
-	g_sGroups[GROUPS_COUNT][64];
+KeyValues
+    g_hVipGroups;
+
+Cookie
+    g_hCookie;
 
 bool
-	g_bWHStatus[MAXPLAYERS+1];
-	
+    g_bCanChange[MAXPLAYERS+1];
 
-public void OnMapStart()
-{
-	GetConVarString(FindConVar("wcs_prefix"), g_sPrefix, sizeof g_sPrefix);
-}
 
 public void OnPluginStart()
 {
-	ExplodeString(GROUPS, ";", g_sGroups, sizeof g_sGroups, sizeof g_sGroups[]);
+    g_hCookie = new Cookie("wcs_addon_change_wh", "WH status", CookieAccess_Private);
 
-	RegConsoleCmd("cwh", Command_ChangeWh);
-	HookEvent("round_start", Event_RoundStart);
+    AddCommandListener(Command_WH, "wh");
+    RegConsoleCmd("cwh", Command_CWH);
 }
 
-public Action Command_ChangeWh(int iClient, int iArgs)
+public void OnMapStart()
 {
-	if(WCS_GetVip(iClient))
-	{
-		char sVipGroup[64];
-		WCS_GetVipGroup(iClient, sVipGroup, sizeof sVipGroup);
+    if(g_hVipGroups)
+    {
+        delete g_hVipGroups;
+    }
 
-		for(int i; i < GROUPS_COUNT; i++) 
-		{
-			if(StrEqual(sVipGroup, g_sGroups[i]))
-			{
-				ServerCommand("wh%s 100 %i", g_bWHStatus[iClient] ? ("_off") : NULL_STRING,  GetClientUserId(iClient));
+    char szPath[PLATFORM_MAX_PATH];
+    BuildPath(Path_SM, szPath, sizeof szPath, "data/wcs/wcs_vip_groups.ini");
 
-				g_bWHStatus[iClient] = g_bWHStatus[iClient] ? false : true;
+    g_hVipGroups = new KeyValues("VipGroups");
+    if(!g_hVipGroups.ImportFromFile(szPath))
+    {
+        SetFailState(PLUGIN_NAME..." : Error read \"%s\", aborting.", szPath);
+    }
 
-				return Plugin_Handled;	
-			}
-		}
-	}
-
-	return Plugin_Handled;
+    /**
+     *  Checking late load
+     */
+    if(RoundToCeil(GetGameTime()) >= 3)
+    {
+        for(int i = 1; i <= MaxClients; i++)
+        {
+            if(WCS_IsPlayerLoaded(i) && !IsFakeClient(i))
+            {
+                WCS_OnVIPLoaded(i);
+            }
+        }
+    }
 }
 
-public void Event_RoundStart(Event hEvent, const char[] sEvName, bool bDontBroadcast)
+public Action Command_WH(int iCmdClient, const char[] sCommand, int iArgs)
 {
-	for (int i = 1; i <= MaxClients; i++)
-		if (WCS_IsPlayerLoaded(i) && !IsFakeClient(i) && !g_bWHStatus[i])
-			if(WCS_GetVip(i))
-				CreateTimer(1.0, Timer_OffWH, GetClientUserId(i), TIMER_FLAG_NO_MAPCHANGE);
-			else
-				g_bWHStatus[i] = true;	
+    char szArg[8];
+    GetCmdArg(iArgs, szArg, sizeof szArg);
+
+    int iClient = GetClientOfUserId(StringToInt(szArg));
+    if(iClient && g_bCanChange[iClient] && UTIL_CookieGetNum(g_hCookie, iClient))
+    {
+        return Plugin_Handled;
+    }
+    
+    return Plugin_Continue;
 }
 
-public Action Timer_OffWH(Handle hTimer, any iUserId)
+public Action Command_CWH(int iClient, int iArgs)
 {
-	ServerCommand("wh_off 100 %i", iUserId);
+    static int iUseTime[MAXPLAYERS+1];
+    int iCurrentTime = GetTime();
+
+    if((iUseTime[iClient] + FLOOD_TIME < iCurrentTime) && g_bCanChange[iClient])
+    {
+        iUseTime[iClient] = iCurrentTime;
+        bool bStatus = !!UTIL_CookieGetNum(g_hCookie, iClient);
+
+        UTIL_CookieSetNum(g_hCookie, iClient, bStatus ? 0 : 1);
+        ServerCommand("wh%s 100 %i", bStatus ? NULL_STRING : ("_off"), GetClientUserId(iClient));
+    }
+
+    return Plugin_Handled;
 }
 
-public void OnClientDisconnected(int iClient)
+public void WCS_OnVIPLoaded(int iClient)
 {
-	g_bWHStatus[iClient] = true;
+    char szGroup[128];
+    if(WCS_GetVipGroup(iClient, szGroup, sizeof szGroup))
+    {
+        g_hVipGroups.Rewind();
+        if(g_hVipGroups.JumpToKey(szGroup))
+        {
+            g_bCanChange[iClient] = !!g_hVipGroups.GetNum("CWH");
+        }
+    }
 }
 
-public void WCS_OnClientLoaded(int iClient)
+public void OnClientDisconnect(int iClient)
 {
-	g_bWHStatus[iClient] = true;
+    g_bCanChange[iClient] = false;
+}
+
+
+/**
+ *  Helpful functions
+ */
+int UTIL_CookieGetNum(Cookie hCookie, int iClient)
+{
+    char szBuff[2];
+    hCookie.Get(iClient, szBuff, sizeof szBuff);
+    return StringToInt(szBuff);
+}
+
+void UTIL_CookieSetNum(Cookie hCookie, int iClient, int iNum)
+{
+    char szBuff[2];
+    IntToString(iNum, szBuff, sizeof szBuff);
+    hCookie.Set(iClient, szBuff);
 }
